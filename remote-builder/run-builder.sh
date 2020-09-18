@@ -26,12 +26,26 @@ cat > ssh-keys <<EOF
 ${USERNAME}:$(cat ${KEYNAME}.pub)
 EOF
 
-${GCLOUD} compute instances create \
+IP=$(${GCLOUD} compute instances create \
        ${INSTANCE_ARGS} ${INSTANCE_NAME} \
        --metadata block-project-ssh-keys=TRUE \
-       --metadata-from-file ssh-keys=ssh-keys
+       --metadata-from-file ssh-keys=ssh-keys \
+       --format='value(networkInterfaces[].accessConfigs[0].natIP.notnull().list())')
 
 trap cleanup EXIT
+
+SECONDS=0
+MAX_SECONDS=${MAX_SECONDS:-30}
+until \
+  nc -w1 -z $IP 22 && \
+  ${GCLOUD} compute ssh --ssh-key-file=${KEYNAME} ${USERNAME}@${INSTANCE_NAME} -- hostname;
+do
+  if (( SECONDS > MAX_SECONDS )); then
+    echo "${USERNAME}@${INSTANCE_NAME} still unreachable after ${SECONDS}, the next connection attempt may or may not work."
+    break
+  fi
+  sleep 1
+done
 
 ${GCLOUD} compute scp --compress --recurse \
        $(pwd) ${USERNAME}@${INSTANCE_NAME}:${REMOTE_WORKSPACE} \
